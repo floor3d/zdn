@@ -5,24 +5,23 @@ const zdn = @import("zdn");
 const util = @import("util.zig");
 
 pub fn main(init: std.process.Init) !void {
-    // Prints to stderr, unbuffered, ignoring potential errors.
-    // util.print("All your {s} are belong to us.\n", .{"codebase"});
-
     // This is appropriate for anything that lives as long as the process.
     const arena: std.mem.Allocator = init.arena.allocator();
+    const io = init.io;
+    var buffer: [1024]u8 = undefined;
+    var stderr_writer = std.Io.File.stderr().writer(io, &buffer);
+    const stderr = &stderr_writer.interface;
+    var u = util.Util._init(init, stderr);
 
     // Accessing command line arguments:
     const args = try init.minimal.args.toSlice(arena);
     for (args) |arg| {
-        std.log.info("arg: {s}", .{arg});
+        u.info("arg: {s}", .{arg});
     }
 
-    return run();
-}
-
-pub fn run() !void {
-    util.info("Yo", .{});
-    // util.print("Yo", .{});
-    // util.warn("Yo", .{});
-    // util.err("Yo", .{});
+    u.info("Yo", .{});
+    u.debug("Yo", .{});
+    u.warn("Yo", .{});
+    u.err("Yo", .{});
+    return;
 }
