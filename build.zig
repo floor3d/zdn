@@ -41,6 +41,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/c_stdlib.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const c_module = translate_c.createModule();
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -70,6 +78,7 @@ pub fn build(b: *std.Build) void {
             // definition if desireable (e.g. firmware for embedded devices).
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             // List of modules available for import in source files part of the
             // root module.
             .imports = &.{
@@ -79,6 +88,10 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "zdn", .module = mod },
+                .{
+                    .name = "c",
+                    .module = c_module,
+                },
             },
         }),
     });
