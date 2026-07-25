@@ -8,7 +8,6 @@ pub const log = @import("std").log;
 pub const io = @import("std").Io;
 const std = @import("std");
 const Io = std.Io;
-// const c = @import("c");
 
 pub const Util = struct {
     init: std.process.Init,
