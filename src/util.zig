@@ -10,7 +10,6 @@ pub const io = @import("std").Io;
 const std = @import("std");
 const Io = std.Io;
 
-//TODO: ALL THE LOGGING IS COMPTIME WTF
 pub const Util = struct {
     init: std.process.Init,
     stderr: *io.Writer,
@@ -23,57 +22,59 @@ pub const Util = struct {
         };
     }
 
-    pub fn print_prefix(self: Util, lev: level) void {
+    fn printf(self: Util, comptime format: []const u8, args: anytype) void {
+        self.stderr.print(format, args) catch {};
+        self.stderr.print("\n", .{}) catch {};
+        self.stderr.flush() catch {};
+    }
+
+    pub fn print_prefix(self: Util, lev: level) !void {
         var datetime_buf: [32]u8 = undefined;
         const pre = self.now(&datetime_buf);
-        switch (lev) {
-            .level.info => self.stderr.writeAll("INFO: "),
-            .level.debug => self.stderr.writeAll("DEBUG: "),
-            .level.warn => self.stderr.writeAll("WARN: "),
-            .level.err => self.stderr.writeAll("ERROR: "),
-        }
-        try self.stderr.print("[{s}] ", .{pre});
-        try self.stderr.flush();
+        try switch (lev) {
+            .info => self.stderr.writeAll("INFO: "),
+            .debug => self.stderr.writeAll("DEBUG: "),
+            .warn => self.stderr.writeAll("WARN: "),
+            .err => self.stderr.writeAll("ERROR: "),
+        };
+        self.stderr.print("[{s}] ", .{pre}) catch {};
+        self.stderr.flush() catch {};
     }
 
     pub fn info(
         self: Util,
-        format: []const u8,
+        comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.info);
-        try self.stderr.print(format, args);
-        try self.stderr.flush();
+        self.print_prefix(level.info) catch {};
+        self.printf(format, args);
     }
 
     pub fn debug(
         self: Util,
-        format: []const u8,
+        comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.debug);
-        try self.stderr.print(format, args);
-        try self.stderr.flush();
+        self.print_prefix(level.debug) catch {};
+        self.printf(format, args);
     }
 
     pub fn warn(
         self: Util,
-        format: []const u8,
+        comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.warn);
-        try self.stderr.print(format, args);
-        try self.stderr.flush();
+        self.print_prefix(level.warn) catch {};
+        self.printf(format, args);
     }
 
     pub fn err(
         self: Util,
-        format: []const u8,
+        comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.err);
-        try self.stderr.print(format, args);
-        try self.stderr.flush();
+        self.print_prefix(level.err) catch {};
+        self.printf(format, args);
     }
 
     pub fn now(self: Util, date_time_str: *[32]u8) []const u8 {

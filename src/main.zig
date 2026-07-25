@@ -15,13 +15,13 @@ pub fn main(init: std.process.Init) !void {
 
     // Accessing command line arguments:
     const args = try init.minimal.args.toSlice(arena);
-    for (args) |arg| {
-        u.info("arg: {s}", .{arg});
+    for (args) |_| {
+        // u.info("arg: {s}", .{arg});
     }
 
-    u.info("Yo", .{});
-    u.debug("Yo", .{});
-    u.warn("Yo", .{});
-    u.err("Yo", .{});
+    u.info("This is an info", .{});
+    u.debug("This is a debug", .{});
+    u.warn("This is a warn", .{});
+    u.err("This is an error", .{});
     return;
 }
