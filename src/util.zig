@@ -5,39 +5,49 @@ pub const e = @import("std").log.err;
 pub const l = @import("std").log.defaultLog;
 pub const level = @import("std").log.Level;
 pub const log = @import("std").log;
-pub const io = @import("std").Io;
 const std = @import("std");
 const Io = std.Io;
 
+const red = "\x1b[31m";
+const yellow = "\x1b[33m";
+const cyan = "\x1b[34m";
+const reset = "\x1b[0m";
+
 pub const Util = struct {
     init: std.process.Init,
-    stderr: *io.Writer,
+    buffer: [1024]u8,
 
-    // Initialize the struct; needs an Init object
-    pub fn _init(init: std.process.Init, stderr: *io.Writer) Util {
+    pub fn _init(init: std.process.Init) Util {
         return .{
             .init = init,
-            .stderr = stderr,
+            .buffer = undefined,
         };
     }
 
     fn printf(self: Util, comptime format: []const u8, args: anytype) void {
-        self.stderr.print(format, args) catch {};
-        self.stderr.print("\n", .{}) catch {};
-        self.stderr.flush() catch {};
+        const new_format = format ++ "\n";
+        self.printf_no_n(new_format, args);
+    }
+
+    fn printf_no_n(self: Util, comptime format: []const u8, args: anytype) void {
+        var s = self;
+        var stderr = std.Io.File.stderr().writer(s.init.io, &s.buffer);
+        var writer = &stderr.interface;
+        writer.print(format, args) catch {};
+        writer.print("{s}", .{reset}) catch {};
+        writer.flush() catch {};
     }
 
     pub fn print_prefix(self: Util, lev: level) !void {
         var datetime_buf: [32]u8 = undefined;
         const pre = self.now(&datetime_buf);
-        try switch (lev) {
-            .info => self.stderr.writeAll("INFO: "),
-            .debug => self.stderr.writeAll("DEBUG: "),
-            .warn => self.stderr.writeAll("WARN: "),
-            .err => self.stderr.writeAll("ERROR: "),
-        };
-        self.stderr.print("[{s}] ", .{pre}) catch {};
-        self.stderr.flush() catch {};
+        self.printf_no_n("[{s}] ", .{pre});
+        switch (lev) {
+            .info => self.printf_no_n("INFO:  ", .{}),
+            .debug => self.printf_no_n("{s}DEBUG: ", .{cyan}),
+            .warn => self.printf_no_n("{s}WARN:  ", .{yellow}),
+            .err => self.printf_no_n("{s}ERROR: ", .{red}),
+        }
     }
 
     pub fn info(
@@ -85,13 +95,41 @@ pub const Util = struct {
         const year = year_and_day.year;
         const month_day = year_and_day.calculateMonthDay();
         const month = month_day.month;
-        const day = month_day.day_index + 1; // 0-indexed to 1-indexed for the calendar day
+        const day = month_day.day_index + 1;
         const day_seconds = epoch_sec_struct.getDaySeconds();
         const hour = day_seconds.getHoursIntoDay();
         const minute = day_seconds.getMinutesIntoHour();
         const second = day_seconds.getSecondsIntoMinute();
 
-        const ret = std.fmt.bufPrint(date_time_str, "{d}-{d:02}-{d:02}T{d:02}:{d:02}:{d:02}", .{ year, month, day, hour, minute, second }) catch unreachable;
+        const ret = std.fmt.bufPrint(date_time_str, "{d}-{d:02}-{d:02} {d:02}:{d:02}:{d:02}", .{ year, month, day, hour, minute, second }) catch unreachable;
         return ret;
+    }
+
+    pub fn print_usage(self: Util) void {
+        self.info("USAGE: ./zdn [config_filepath]", .{});
+    }
+
+    pub fn read_file(self: Util, filepath: []const u8, file_contents: *[4096]u8) !usize {
+        var alloc: std.heap.DebugAllocator(.{}) = .init;
+        defer _ = alloc.deinit();
+        const allocator = alloc.allocator();
+
+        var threaded: std.Io.Threaded = .init(allocator, .{
+            .argv0 = .init(self.init.minimal.args),
+            .environ = self.init.minimal.environ,
+        });
+        defer threaded.deinit();
+        const tio = threaded.io();
+
+        var file = try std.Io.Dir.cwd().openFile(tio, filepath, .{ .mode = .read_only });
+        defer file.close(tio);
+
+        var read_buf: [4096]u8 = undefined;
+        var file_reader = file.reader(tio, &read_buf);
+        const reader = &file_reader.interface;
+        var contents: [4096]u8 = undefined;
+        const n: usize = try reader.readSliceShort(&contents);
+        @memcpy(file_contents, contents[0..]);
+        return n;
     }
 };

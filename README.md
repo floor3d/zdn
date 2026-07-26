@@ -37,6 +37,6 @@ creates processes for each client
 1. Log to a file: [DEVICE_TYPE]_[ID].log
 2. [+], [!], ..., need some sort of logger library
 3. Server Port == [INIT_VALUE] + Server Id
-3a. pop server init value: 9000; server 1 is 9001
-4. client asks origin for a pop, origin gives client an ID and pop server's ip/port;
-this is a signup message or something
+4. pop server init value: 9000; server 1 is 9001
+5. client asks origin for a pop, origin gives client an ID and pop server's ip/port;
+"this is a signup message" or something
