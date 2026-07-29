@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const zdn = @import("zdn");
 const util = @import("util.zig");
+const zocket = @import("zocket.zig");
 
 pub fn main(init: std.process.Init) !void {
     // This is appropriate for anything that lives as long as the process.
@@ -17,13 +18,20 @@ pub fn main(init: std.process.Init) !void {
     if (args.len < 2) {
         u.err("No filepath given.", .{});
         u.print_usage();
+        return;
     }
 
     u.info("Using configuration file: {s}", .{args[1]});
 
     var file_contents: [4096]u8 = undefined;
-    const config_file_size: usize = try u.read_file("/home/evand/Programming/zdn/README.md", &file_contents);
-    u.info("{d}: {s}", .{ config_file_size, file_contents });
+    const config_file_size = u.read_file(args[1], &file_contents) catch 0;
+    if (config_file_size == 0) {
+        u.err("Failed to read file!", .{});
+        return;
+    }
+
+    const z = zocket.Zocket._init(init);
+    u.info("{any}", .{z});
 
     return;
 }

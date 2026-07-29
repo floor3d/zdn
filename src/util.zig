@@ -1,11 +1,5 @@
-pub const i = @import("std").log.info;
-pub const p = @import("std").log.debug;
-pub const w = @import("std").log.warn;
-pub const e = @import("std").log.err;
-pub const l = @import("std").log.defaultLog;
-pub const level = @import("std").log.Level;
-pub const log = @import("std").log;
 const std = @import("std");
+pub const level = std.log.Level;
 const Io = std.Io;
 
 const red = "\x1b[31m";
@@ -30,6 +24,7 @@ pub const Util = struct {
     }
 
     fn printf_no_n(self: Util, comptime format: []const u8, args: anytype) void {
+        // This dumb shit is required to get a mutable `self`
         var s = self;
         var stderr = std.Io.File.stderr().writer(s.init.io, &s.buffer);
         var writer = &stderr.interface;
