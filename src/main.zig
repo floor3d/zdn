@@ -30,8 +30,14 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    const z = zocket.Zocket._init(init);
-    u.info("{any}", .{z});
+    var nio_inner = zocket.C_NetIO{ .u = u };
+    const net_io = zocket.Generic_NetIO(zocket.C_NetIO){ .inner = &nio_inner };
+
+    net_io.bind("127.0.0.1", 9797) catch {};
+
+    const sock = try net_io.accept();
+
+    try sock.close();
 
     return;
 }
