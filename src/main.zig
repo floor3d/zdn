@@ -11,9 +11,6 @@ pub fn main(init: std.process.Init) !void {
 
     // Accessing command line arguments:
     const args = try init.minimal.args.toSlice(arena);
-    for (args) |_| {
-        // u.info("arg: {s}", .{arg});
-    }
 
     if (args.len < 2) {
         u.err("No filepath given.", .{});
@@ -35,7 +32,12 @@ pub fn main(init: std.process.Init) !void {
 
     net_io.bind("127.0.0.1", 9797) catch {};
 
-    const sock = try net_io.accept();
+    const sock = net_io.accept() catch {
+        u.err("Quitting early!", .{});
+        return;
+    };
+
+    //TODO: modify bind to actually use the ip and port; write `connect()` and work toward 1 server 1 client
 
     try sock.close();
 
