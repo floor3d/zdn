@@ -16,6 +16,10 @@ const errs = error{
     ErrAccept,
 };
 
+/// Generic Socket Adapter
+/// Standard interface for any kind of socket, ex. Zig or C sockets
+/// Plug in any socket functionality by calling this method with your socket struct
+/// and implementing the functions in the struct that this function returns
 pub fn Generic_Socket(comptime T: type) type {
     return struct {
         inner: *T,
@@ -36,6 +40,12 @@ pub fn Generic_Socket(comptime T: type) type {
     };
 }
 
+/// Generic Network IO Adapter
+/// Standard interface for functions that set up network IO
+/// Intuition: call `bind()` once, and each `accept()` call will give you
+/// a generic socket to send and receive messages
+/// Plug in any network IO by calling this method with your net IO struct
+/// and implementing the functions in the struct that this function returns
 pub fn Generic_NetIO(comptime T: type) type {
     return struct {
         inner: *T,
@@ -52,6 +62,10 @@ pub fn Generic_NetIO(comptime T: type) type {
     };
 }
 
+/// A Plug-in struct to be used with Generic Net IO Adapter
+/// Mirrors C network IO functions as found in `std.os.linux`:
+/// `bind()`, `accept()`
+/// Note that `bind()` covers both `bind()` and `listen()`
 pub const C_NetIO = struct {
     u: util.Util,
 
@@ -66,7 +80,6 @@ pub const C_NetIO = struct {
         self.u.debug("Binding on {s}:{d}", .{ ip, port });
 
         // Plan: Just handle ipv4 for now because fuck the system!
-        // Note: There is no `posix.socket` ...
         c_sock = linux.socket(std.c.AF.INET, std.c.SOCK.STREAM | std.c.SOCK.NONBLOCK, 0);
         if (c_sock > std.math.maxInt(usize) - 100) {
             self.u.err("Uh oh ... socket is {d}", .{c_sock});
@@ -75,21 +88,34 @@ pub const C_NetIO = struct {
 
         self.u.debug("Socket: {d}", .{c_sock});
 
-        const s_in: sockaddr_in = .{ .family = posix.AF.INET, .port = std.mem.nativeToBig(u16, port), .addr = std.mem.nativeToBig(u32, 0x7F000001) };
+        const parsed_ip: Io.net.Ip4Address = Io.net.Ip4Address.parse(ip, port) catch {
+            return errs.ErrBind;
+        };
+
+        const ip_addr: u32 = std.mem.readInt(u32, &parsed_ip.bytes, .big);
+
+        const be_port = std.mem.nativeToBig(u16, parsed_ip.port);
+
+        self.u.debug("IP is {any} and port is {any}", .{ ip_addr, be_port });
+
+        const s_in: sockaddr_in = .{ .family = posix.AF.INET, .port = be_port, .addr = ip_addr };
 
         const bind_result: usize = linux.bind(@as(i32, @intCast(c_sock)), @ptrCast(&s_in), @sizeOf(sockaddr_in));
 
         if (bind_result != 0) {
-            self.u.err("Uh oh ... bind_result is {d}", .{bind_result});
+            self.u.err("Uh oh ... bind_result is {d}", .{std.math.maxInt(usize) - bind_result});
             return errs.ErrBind;
         }
 
         const listen_result: usize = linux.listen(@as(i32, @intCast(c_sock)), 10);
 
         if (listen_result != 0) {
-            self.u.err("Uh oh ... listen_result is {d}", .{listen_result});
+            self.u.err("Uh oh ... listen_result is {d}", .{std.math.maxInt(usize) - listen_result});
             return errs.ErrBind;
         }
+
+        self.u.info("Sleeping 10", .{});
+        self.u.sleep(10);
 
         return;
     }
@@ -116,6 +142,8 @@ pub const C_NetIO = struct {
     }
 };
 
+/// A Plug-in struct to be used with Generic Socket Adapter
+/// Made to mirror C socket functionality
 pub const C_Socket = struct {
     parent: *C_NetIO,
     sock: usize,

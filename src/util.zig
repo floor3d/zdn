@@ -127,4 +127,8 @@ pub const Util = struct {
         @memcpy(file_contents, contents[0..]);
         return n;
     }
+
+    pub fn sleep(self: Util, seconds: i64) void {
+        Io.sleep(self.init.io, .fromSeconds(seconds), .awake) catch {};
+    }
 };
