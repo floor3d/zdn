@@ -92,11 +92,10 @@ pub const C_NetIO = struct {
             return errs.ErrBind;
         };
 
-        const ip_addr: u32 = std.mem.readInt(u32, &parsed_ip.bytes, .big);
+        // I do not really understand why `.little` is correct here and `.big` isn't
+        const ip_addr: u32 = std.mem.readInt(u32, &parsed_ip.bytes, .little);
 
         const be_port = std.mem.nativeToBig(u16, parsed_ip.port);
-
-        self.u.debug("IP is {any} and port is {any}", .{ ip_addr, be_port });
 
         const s_in: sockaddr_in = .{ .family = posix.AF.INET, .port = be_port, .addr = ip_addr };
 

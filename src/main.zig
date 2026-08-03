@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
         return;
     };
 
-    //TODO: modify bind to actually use the ip and port; write `connect()` and work toward 1 server 1 client
+    //TODO: write `connect()` and work toward 1 server 1 client
 
     try sock.close();
 
