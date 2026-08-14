@@ -9,7 +9,6 @@ pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     var u = util.Util._init(init);
 
-    // Accessing command line arguments:
     const args = try init.minimal.args.toSlice(arena);
 
     if (args.len < 2) {
@@ -27,19 +26,25 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    var nio_inner = zocket.C_NetIO{ .u = u };
+    var nio_inner = zocket.C_NetIO{ .u = u, .allocator = arena };
     const net_io = zocket.Generic_NetIO(zocket.C_NetIO){ .inner = &nio_inner };
 
-    net_io.bind("127.0.0.1", 9797) catch {};
+    // net_io.bind("127.0.0.1", 9797) catch {};
 
-    const sock = net_io.accept() catch {
-        u.err("Quitting early!", .{});
-        return;
-    };
+    // const sock = net_io.accept() catch {
+    //     u.err("Quitting early!", .{});
+    //     return;
+    // };
 
-    //TODO: write `connect()` and work toward 1 server 1 client
+    // sock.close();
 
-    try sock.close();
+    // TODO: This kind of sucks. I should just make it one surface struct and just deal with several generic NetIO's
+    // instead of getting sockets from the generic NetIOs (?)
+    const sock = try net_io.connect("127.0.0.1", 9797, 3);
+
+    u.sleep(2);
+
+    sock.close();
 
     return;
 }

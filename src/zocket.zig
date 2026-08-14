@@ -8,12 +8,21 @@ const sockaddr_storage = sockaddr.storage;
 const sockaddr_in = sockaddr.in;
 const sockaddr_in6 = sockaddr.in6;
 const socklen_t = posix.socklen_t;
+const success = linux.E.SUCCESS;
 
 const errs = error{
     /// Couldn't bind on specified address and port.
     ErrBind,
     /// Call to `accept` failed for some reason, perhaps that there was nothing to accept
     ErrAccept,
+    /// Call to linux `socket` failed
+    ErrSocket,
+    /// Call to linux `connect` failed
+    ErrConnect,
+    /// Call to linux `listen` failed
+    ErrListen,
+    /// Failed to parse IP Address
+    ErrParseIP,
 };
 
 /// Generic Socket Adapter
@@ -34,7 +43,7 @@ pub fn Generic_Socket(comptime T: type) type {
             return self.inner.recvmsg();
         }
 
-        pub fn close(self: Self) errs!void {
+        pub fn close(self: Self) void {
             return self.inner.close();
         }
     };
@@ -59,6 +68,10 @@ pub fn Generic_NetIO(comptime T: type) type {
         pub fn accept(self: Self) errs!Generic_Socket(T.socktype) {
             return self.inner.accept();
         }
+
+        pub fn connect(self: Self, ip: []const u8, port: u16, timeout: u16) errs!Generic_Socket(T.socktype) {
+            return self.inner.connect(ip, port, timeout);
+        }
     };
 }
 
@@ -68,28 +81,18 @@ pub fn Generic_NetIO(comptime T: type) type {
 /// Note that `bind()` covers both `bind()` and `listen()`
 pub const C_NetIO = struct {
     u: util.Util,
+    c_sock: usize = 0,
+    allocator: std.mem.Allocator,
 
     pub const socktype = C_Socket;
-    var c_sock: usize = 0;
 
     pub fn get_socktype_str() []const u8 {
         return "C_Socket";
     }
 
-    pub fn bind(self: C_NetIO, ip: []const u8, port: u16) errs!void {
-        self.u.debug("Binding on {s}:{d}", .{ ip, port });
-
-        // Plan: Just handle ipv4 for now because fuck the system!
-        c_sock = linux.socket(std.c.AF.INET, std.c.SOCK.STREAM | std.c.SOCK.NONBLOCK, 0);
-        if (c_sock > std.math.maxInt(usize) - 100) {
-            self.u.err("Uh oh ... socket is {d}", .{c_sock});
-            return errs.ErrBind;
-        }
-
-        self.u.debug("Socket: {d}", .{c_sock});
-
+    pub fn ip_port_to_sockaddr(ip: []const u8, port: u16) errs!sockaddr_in {
         const parsed_ip: Io.net.Ip4Address = Io.net.Ip4Address.parse(ip, port) catch {
-            return errs.ErrBind;
+            return errs.ErrParseIP;
         };
 
         // I do not really understand why `.little` is correct here and `.big` isn't
@@ -99,22 +102,36 @@ pub const C_NetIO = struct {
 
         const s_in: sockaddr_in = .{ .family = posix.AF.INET, .port = be_port, .addr = ip_addr };
 
-        const bind_result: usize = linux.bind(@as(i32, @intCast(c_sock)), @ptrCast(&s_in), @sizeOf(sockaddr_in));
+        return s_in;
+    }
 
-        if (bind_result != 0) {
+    pub fn bind(self: C_NetIO, ip: []const u8, port: u16) errs!void {
+        self.u.debug("Binding on {s}:{d}", .{ ip, port });
+
+        // Plan: Just handle ipv4 for now because fuck the system!
+        self.c_sock = linux.socket(std.c.AF.INET, std.c.SOCK.STREAM | std.c.SOCK.NONBLOCK, 0);
+        if (linux.errno(self.c_sock) != success) {
+            self.u.err("Uh oh ... socket is {d}", .{self.c_sock});
+            return errs.ErrSocket;
+        }
+
+        self.u.debug("Socket: {d}", .{self.c_sock});
+
+        const s_in = try ip_port_to_sockaddr(ip, port);
+
+        const bind_result: usize = linux.bind(@as(i32, @intCast(self.c_sock)), @ptrCast(&s_in), @sizeOf(sockaddr_in));
+
+        if (linux.errno(bind_result) != success) {
             self.u.err("Uh oh ... bind_result is {d}", .{std.math.maxInt(usize) - bind_result});
             return errs.ErrBind;
         }
 
-        const listen_result: usize = linux.listen(@as(i32, @intCast(c_sock)), 10);
+        const listen_result: usize = linux.listen(@as(i32, @intCast(self.c_sock)), 10);
 
-        if (listen_result != 0) {
+        if (linux.errno(listen_result) != success) {
             self.u.err("Uh oh ... listen_result is {d}", .{std.math.maxInt(usize) - listen_result});
-            return errs.ErrBind;
+            return errs.ErrListen;
         }
-
-        self.u.info("Sleeping 10", .{});
-        self.u.sleep(10);
 
         return;
     }
@@ -122,21 +139,99 @@ pub const C_NetIO = struct {
     // Self needs to be a pointer here so that when we return from the function,
     // the `C_Socket` stays valid and doesn't get wiped out with the function stack frame
     pub fn accept(self: *C_NetIO) errs!Generic_Socket(socktype) {
-        // Placeholder
         var addr: sockaddr_in = std.mem.zeroes(sockaddr_in);
-        var addr_len: socklen_t = 0;
-        const sock: usize = linux.accept(@as(i32, @intCast(c_sock)), @ptrCast(&addr), &addr_len);
-        if (sock > std.math.maxInt(usize) - 100) {
+        var addr_len: socklen_t = @sizeOf(sockaddr_in);
+        const sock: usize = linux.accept(@as(i32, @intCast(self.c_sock)), @ptrCast(&addr), &addr_len);
+        if (linux.errno(sock) != success) {
             self.u.err("Uh oh ... accept failed!", .{});
-            return errs.ErrAccept;
+            return errs.ErrSocket;
         }
-        var c_s = C_Socket._init(
+        var c_s: *C_Socket = self.allocator.create(C_Socket) catch {
+            return errs.ErrConnect;
+        };
+        (*c_s)._init(
             self,
             sock,
             addr,
         ) catch {
-            return errs.ErrBind;
+            return errs.ErrAccept;
         };
+        errdefer self.allocator.destroy(c_s);
+        return Generic_Socket(C_Socket){ .inner = &c_s };
+    }
+
+    pub fn poll_on_sock_connect(self: C_NetIO, sock_fd: usize, connect_res: usize, timeout: u16) errs!void {
+        var en = linux.errno(connect_res);
+        if (en != success and en != linux.E.INPROGRESS) {
+            self.u.err("Call to connect failed with errno {any}!", .{en});
+            return errs.ErrConnect;
+        }
+
+        var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
+        pfd.fd = @as(i32, @intCast(sock_fd));
+        pfd.events = linux.POLL.OUT;
+
+        const poll_result: usize = linux.poll((&pfd)[0..1], 1, @as(i32, @intCast(timeout)));
+        en = linux.errno(poll_result);
+
+        if (en != success) {
+            self.u.err("POLL failed with errno {any}!", .{en});
+            return errs.ErrConnect;
+        }
+
+        if (poll_result == 0) {
+            self.u.err("POLL timed out!", .{});
+            return errs.ErrConnect;
+        }
+
+        if (pfd.revents & (linux.POLL.OUT | linux.POLL.ERR | linux.POLL.HUP) == 0) {
+            self.u.err("No PFD revents!", .{});
+            return errs.ErrConnect;
+        }
+
+        var so_error: i32 = 0;
+        var socklen: socklen_t = 0;
+
+        const gso_result: usize = linux.getsockopt(@as(i32, @intCast(sock_fd)), linux.SOL.SOCKET, linux.SO.ERROR, @ptrCast(&so_error), &socklen);
+        en = linux.errno(gso_result);
+        if (en != success) {
+            self.u.err("getsockopt() failed with errno {any}!", .{en});
+            return errs.ErrConnect;
+        }
+
+        if (so_error != 0) {
+            self.u.err("Socket failed to connect with errno {any}!", .{so_error});
+            return errs.ErrConnect;
+        }
+    }
+
+    // Self needs to be a pointer here so that when we return from the function,
+    // the `C_Socket` stays valid and doesn't get wiped out with the function stack frame
+    pub fn connect(self: *C_NetIO, ip: []const u8, port: u16, timeout: u16) errs!Generic_Socket(socktype) {
+        self.u.debug("Connecting to {s}:{d}", .{ ip, port });
+
+        // Plan: Just handle ipv4 for now because fuck the system!
+        self.c_sock = linux.socket(std.c.AF.INET, std.c.SOCK.STREAM | std.c.SOCK.NONBLOCK, 0);
+        if (linux.errno(self.c_sock) != success) {
+            self.u.err("Failed to create socket!", .{});
+            return errs.ErrSocket;
+        }
+
+        const s_in: sockaddr_in = try ip_port_to_sockaddr(ip, port);
+        const connect_result: usize = linux.connect(@as(i32, @intCast(self.c_sock)), &s_in, @sizeOf(sockaddr_in));
+        try self.poll_on_sock_connect(self.c_sock, connect_result, timeout);
+        var c_s: *C_Socket = self.allocator.create(C_Socket) catch {
+            return errs.ErrConnect;
+        };
+        errdefer self.allocator.destroy(c_s);
+        (*c_s)._init(
+            self,
+            self.c_sock,
+            s_in,
+        ) catch {
+            return errs.ErrConnect;
+        };
+
         return Generic_Socket(C_Socket){ .inner = &c_s };
     }
 };
@@ -169,8 +264,14 @@ pub const C_Socket = struct {
         return "";
     }
 
-    pub fn close(self: C_Socket) errs!void {
+    pub fn close(self: C_Socket) void {
         self.parent.u.debug("Closing", .{});
+        const close_result: usize = linux.close(@as(i32, @intCast(self.sock)));
+        if (linux.errno(close_result) != success) {
+            self.parent.u.err("Failed to close socket!", .{});
+        }
+        //TODO: Fix this ... it sux
+        self.parent.allocator.destroy(self);
         return;
     }
 };
