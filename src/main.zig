@@ -38,13 +38,21 @@ pub fn main(init: std.process.Init) !void {
 
     // sock.close();
 
-    // TODO: This kind of sucks. I should just make it one surface struct and just deal with several generic NetIO's
-    // instead of getting sockets from the generic NetIOs (?)
-    const sock = try net_io.connect("127.0.0.1", 9797, 3);
+    // const sock = try net_io.connect("127.0.0.1", 9797, 3);
 
-    u.sleep(2);
+    // net_io.close(sock);
 
-    sock.close();
+    net_io.bind("0.0.0.0", 9798) catch {
+        u.err("Failed to bind...", .{});
+        return;
+    };
+
+    _ = net_io.accept() catch {
+        u.err("Failed to accept...", .{});
+        return;
+    };
+
+    net_io.close_bind();
 
     return;
 }

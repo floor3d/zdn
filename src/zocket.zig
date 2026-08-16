@@ -43,8 +43,8 @@ pub fn Generic_Socket(comptime T: type) type {
             return self.inner.recvmsg();
         }
 
-        pub fn close(self: Self) void {
-            return self.inner.close();
+        pub fn _close(self: Self) void {
+            self.inner._close();
         }
     };
 }
@@ -71,6 +71,14 @@ pub fn Generic_NetIO(comptime T: type) type {
 
         pub fn connect(self: Self, ip: []const u8, port: u16, timeout: u16) errs!Generic_Socket(T.socktype) {
             return self.inner.connect(ip, port, timeout);
+        }
+
+        pub fn close(self: Self, generic_sock: Generic_Socket(T.socktype)) void {
+            return self.inner.close(generic_sock);
+        }
+
+        pub fn close_bind(self: Self) void {
+            return self.inner.close_bind();
         }
     };
 }
@@ -105,7 +113,7 @@ pub const C_NetIO = struct {
         return s_in;
     }
 
-    pub fn bind(self: C_NetIO, ip: []const u8, port: u16) errs!void {
+    pub fn bind(self: *C_NetIO, ip: []const u8, port: u16) errs!void {
         self.u.debug("Binding on {s}:{d}", .{ ip, port });
 
         // Plan: Just handle ipv4 for now because fuck the system!
@@ -142,6 +150,7 @@ pub const C_NetIO = struct {
         var addr: sockaddr_in = std.mem.zeroes(sockaddr_in);
         var addr_len: socklen_t = @sizeOf(sockaddr_in);
         const sock: usize = linux.accept(@as(i32, @intCast(self.c_sock)), @ptrCast(&addr), &addr_len);
+        try self.poll_on_sock_accept(sock, 10);
         if (linux.errno(sock) != success) {
             self.u.err("Uh oh ... accept failed!", .{});
             return errs.ErrSocket;
@@ -149,24 +158,35 @@ pub const C_NetIO = struct {
         var c_s: *C_Socket = self.allocator.create(C_Socket) catch {
             return errs.ErrConnect;
         };
-        (*c_s)._init(
-            self,
-            sock,
-            addr,
-        ) catch {
-            return errs.ErrAccept;
-        };
-        errdefer self.allocator.destroy(c_s);
-        return Generic_Socket(C_Socket){ .inner = &c_s };
+        c_s._init(self, sock, addr);
+        return Generic_Socket(C_Socket){ .inner = c_s };
     }
 
     pub fn poll_on_sock_connect(self: C_NetIO, sock_fd: usize, connect_res: usize, timeout: u16) errs!void {
-        var en = linux.errno(connect_res);
+        const en = linux.errno(connect_res);
         if (en != success and en != linux.E.INPROGRESS) {
             self.u.err("Call to connect failed with errno {any}!", .{en});
             return errs.ErrConnect;
         }
 
+        try self.poll_on_sock(sock_fd, timeout);
+    }
+
+    pub fn poll_on_sock_accept(self: C_NetIO, accept_res: usize, timeout: u16) errs!void {
+        const en = linux.errno(accept_res);
+        // No WOULDBLOCK exists in linux.E; it's synonymous with .AGAIN according to the source
+        if (en != success and en != linux.E.AGAIN) {
+            self.u.err("Call to accept failed with errno {any}!", .{en});
+            return errs.ErrConnect;
+        }
+
+        try self.poll_on_sock(accept_res, timeout);
+    }
+
+    pub fn poll_on_sock(self: C_NetIO, sock_fd: usize, timeout: u16) errs!void {
+        self.u.debug("Sock fd is {any}", .{sock_fd});
+        var en = linux.errno(sock_fd);
+        std.debug.assert(en == success);
         var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
         pfd.fd = @as(i32, @intCast(sock_fd));
         pfd.events = linux.POLL.OUT;
@@ -224,15 +244,22 @@ pub const C_NetIO = struct {
             return errs.ErrConnect;
         };
         errdefer self.allocator.destroy(c_s);
-        (*c_s)._init(
-            self,
-            self.c_sock,
-            s_in,
-        ) catch {
-            return errs.ErrConnect;
-        };
+        c_s._init(self, self.c_sock, s_in);
 
-        return Generic_Socket(C_Socket){ .inner = &c_s };
+        return Generic_Socket(C_Socket){ .inner = c_s };
+    }
+
+    pub fn close(self: C_NetIO, generic_sock: Generic_Socket(C_Socket)) void {
+        generic_sock._close();
+        self.allocator.destroy(&generic_sock);
+        return;
+    }
+
+    pub fn close_bind(self: C_NetIO) void {
+        const close_result: usize = linux.close(@as(i32, @intCast(self.c_sock)));
+        if (linux.errno(close_result) != success) {
+            self.u.err("Failed to close bind socket!", .{});
+        }
     }
 };
 
@@ -243,12 +270,10 @@ pub const C_Socket = struct {
     sock: usize,
     addr: sockaddr_in,
 
-    pub fn _init(parent: *C_NetIO, sock: usize, addr: sockaddr_in) errs!C_Socket {
-        return .{
-            .parent = parent,
-            .sock = sock,
-            .addr = addr,
-        };
+    pub fn _init(self: *C_Socket, parent: *C_NetIO, sock: usize, addr: sockaddr_in) void {
+        self.parent = parent;
+        self.sock = sock;
+        self.addr = addr;
     }
 
     pub fn write(self: C_Socket, msg: []const u8) errs!usize {
@@ -264,14 +289,10 @@ pub const C_Socket = struct {
         return "";
     }
 
-    pub fn close(self: C_Socket) void {
-        self.parent.u.debug("Closing", .{});
+    pub fn _close(self: C_Socket) void {
         const close_result: usize = linux.close(@as(i32, @intCast(self.sock)));
         if (linux.errno(close_result) != success) {
             self.parent.u.err("Failed to close socket!", .{});
         }
-        //TODO: Fix this ... it sux
-        self.parent.allocator.destroy(self);
-        return;
     }
 };
