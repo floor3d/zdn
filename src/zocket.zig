@@ -188,7 +188,7 @@ pub const C_NetIO = struct {
         var en = linux.errno(sock_fd);
         std.debug.assert(en == success);
         var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
-        pfd.fd = @as(i32, @intCast(sock_fd));
+        pfd.fd = sock_fd; //@as(i32, @intCast(sock_fd));
         pfd.events = linux.POLL.OUT;
 
         const poll_result: usize = linux.poll((&pfd)[0..1], 1, @as(i32, @intCast(timeout)));
