@@ -29,19 +29,6 @@ pub fn main(init: std.process.Init) !void {
     var nio_inner = zocket.C_NetIO{ .u = u, .allocator = arena };
     const net_io = zocket.Generic_NetIO(zocket.C_NetIO){ .inner = &nio_inner };
 
-    // net_io.bind("127.0.0.1", 9797) catch {};
-
-    // const sock = net_io.accept() catch {
-    //     u.err("Quitting early!", .{});
-    //     return;
-    // };
-
-    // sock.close();
-
-    // const sock = try net_io.connect("127.0.0.1", 9797, 3);
-
-    // net_io.close(sock);
-
     net_io.bind("0.0.0.0", 9798) catch {
         u.err("Failed to bind...", .{});
         return;
@@ -53,6 +40,8 @@ pub fn main(init: std.process.Init) !void {
     };
 
     _ = sock.write("Yo\n") catch {};
+    var buf: [4096]u8 = undefined;
+    _ = sock.recv(&buf, buf.len) catch {};
 
     net_io.close_bind();
 

@@ -25,6 +25,8 @@ const errs = error{
     ErrParseIP,
     /// Failed Write syscall
     ErrWrite,
+    /// Failed Recvfrom
+    ErrRecv,
 };
 
 /// Generic Socket Adapter
@@ -41,8 +43,8 @@ pub fn Generic_Socket(comptime T: type) type {
             return self.inner.write(msg);
         }
 
-        pub fn recv(self: Self) errs![]const u8 {
-            return self.inner.recv();
+        pub fn recv(self: Self, buf: []u8, len: usize) errs![]const u8 {
+            return self.inner.recv(buf, len);
         }
 
         pub fn _close(self: Self) void {
@@ -81,6 +83,10 @@ pub fn Generic_NetIO(comptime T: type) type {
 
         pub fn close_bind(self: Self) void {
             return self.inner.close_bind();
+        }
+
+        pub fn pollfds(self: Self, socks: []const Generic_Socket(T.socktype), results: []Generic_Socket(T.socktype)) errs!void {
+            return self.inner.pollfds(socks, results);
         }
     };
 }
@@ -125,21 +131,35 @@ pub const C_NetIO = struct {
             return errs.ErrSocket;
         }
 
-        self.u.debug("Socket: {d}", .{self.c_sock});
+        self.u.debug("Bind socket: {d}", .{self.c_sock});
 
         const s_in = try ip_port_to_sockaddr(ip, port);
 
-        const bind_result: usize = linux.bind(@as(i32, @intCast(self.c_sock)), @ptrCast(&s_in), @sizeOf(sockaddr_in));
+        const s = @as(i32, @intCast(self.c_sock));
 
-        if (linux.errno(bind_result) != success) {
-            self.u.err("Uh oh ... bind_result is {d}", .{std.math.maxInt(usize) - bind_result});
+        const opt: i32 = 1;
+
+        const sso_result: usize = linux.setsockopt(s, linux.SOL.SOCKET, linux.SO.REUSEADDR, @ptrCast(&opt), @sizeOf(i32));
+
+        var en = linux.errno(sso_result);
+        if (en != success) {
+            self.u.err("Uh oh ... sso_result is {any}", .{en});
+            return errs.ErrBind;
+        }
+
+        const bind_result: usize = linux.bind(s, @ptrCast(&s_in), @sizeOf(sockaddr_in));
+
+        en = linux.errno(bind_result);
+        if (en != success) {
+            self.u.err("Uh oh ... bind_result is {any}", .{en});
             return errs.ErrBind;
         }
 
         const listen_result: usize = linux.listen(@as(i32, @intCast(self.c_sock)), 10);
 
-        if (linux.errno(listen_result) != success) {
-            self.u.err("Uh oh ... listen_result is {d}", .{std.math.maxInt(usize) - listen_result});
+        en = linux.errno(listen_result);
+        if (en != success) {
+            self.u.err("Uh oh ... listen_result is {any}", .{en});
             return errs.ErrListen;
         }
 
@@ -161,6 +181,7 @@ pub const C_NetIO = struct {
             return errs.ErrConnect;
         };
         c_s._init(self, sock, addr);
+        self.u.debug("Accepted socket: {any}", .{sock});
         return Generic_Socket(C_Socket){ .inner = c_s };
     }
 
@@ -269,6 +290,31 @@ pub const C_NetIO = struct {
             self.u.err("Failed to close bind socket!", .{});
         }
     }
+
+    pub fn pollfds(self: C_NetIO, socks: []const Generic_Socket(C_Socket), results: []Generic_Socket(C_Socket)) errs!void {
+        // TODO: IMPL
+        // var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
+        // pfd.fd = @as(i32, @intCast(listen_sock));
+        // pfd.events = linux.POLL.IN;
+        //
+        // const poll_result: usize = linux.poll((&pfd)[0..1], socks.len, @as(i32, @intCast(timeout)) * 1000);
+        // const en = linux.errno(poll_result);
+        //
+        // if (en != success) {
+        //     self.u.err("POLL failed with errno {any}!", .{en});
+        //     return errs.ErrAccept;
+        // }
+        //
+        // if (poll_result == 0) {
+        //     self.u.err("POLL timed out!", .{});
+        //     return errs.ErrAccept;
+        // }
+        //
+        // if (pfd.revents & linux.POLL.IN == 0) {
+        //     self.u.err("No POLLIN events!", .{});
+        //     return errs.ErrAccept;
+        // }
+    }
 };
 
 /// A Plug-in struct to be used with Generic Socket Adapter
@@ -297,8 +343,20 @@ pub const C_Socket = struct {
         return result;
     }
 
-    pub fn recv(self: C_Socket) errs![]const u8 {
-        self.parent.u.debug("Receiving", .{});
+    pub fn recv(self: C_Socket, buf: []u8, len: usize) errs![]const u8 {
+        self.parent.u.debug("Receiving from fd {any}", .{self.sock});
+        const s: i32 = @as(i32, @intCast(self.sock));
+
+        var bytes_read: usize = 0;
+        while (bytes_read < len) {
+            const result = linux.recvfrom(s, buf.ptr, len - bytes_read, 0, null, null);
+            const en = linux.errno(result);
+            if (en != success) {
+                self.parent.u.err("Failed to recv with errno {any}", .{en});
+                return errs.ErrRecv;
+            }
+            bytes_read += result;
+        }
         return "";
     }
 
