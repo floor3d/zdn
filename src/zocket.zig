@@ -23,6 +23,8 @@ const errs = error{
     ErrListen,
     /// Failed to parse IP Address
     ErrParseIP,
+    /// Failed Write syscall
+    ErrWrite,
 };
 
 /// Generic Socket Adapter
@@ -39,8 +41,8 @@ pub fn Generic_Socket(comptime T: type) type {
             return self.inner.write(msg);
         }
 
-        pub fn recvmsg(self: Self) errs![]const u8 {
-            return self.inner.recvmsg();
+        pub fn recv(self: Self) errs![]const u8 {
+            return self.inner.recv();
         }
 
         pub fn _close(self: Self) void {
@@ -149,8 +151,8 @@ pub const C_NetIO = struct {
     pub fn accept(self: *C_NetIO) errs!Generic_Socket(socktype) {
         var addr: sockaddr_in = std.mem.zeroes(sockaddr_in);
         var addr_len: socklen_t = @sizeOf(sockaddr_in);
-        const sock: usize = linux.accept(@as(i32, @intCast(self.c_sock)), @ptrCast(&addr), &addr_len);
-        try self.poll_on_sock_accept(sock, 10);
+        try self.poll_on_sock_accept(self.c_sock, 10);
+        const sock: usize = linux.accept4(@as(i32, @intCast(self.c_sock)), @ptrCast(&addr), &addr_len, linux.SOCK.NONBLOCK);
         if (linux.errno(sock) != success) {
             self.u.err("Uh oh ... accept failed!", .{});
             return errs.ErrSocket;
@@ -163,35 +165,17 @@ pub const C_NetIO = struct {
     }
 
     pub fn poll_on_sock_connect(self: C_NetIO, sock_fd: usize, connect_res: usize, timeout: u16) errs!void {
-        const en = linux.errno(connect_res);
+        var en = linux.errno(connect_res);
         if (en != success and en != linux.E.INPROGRESS) {
             self.u.err("Call to connect failed with errno {any}!", .{en});
             return errs.ErrConnect;
         }
 
-        try self.poll_on_sock(sock_fd, timeout);
-    }
-
-    pub fn poll_on_sock_accept(self: C_NetIO, accept_res: usize, timeout: u16) errs!void {
-        const en = linux.errno(accept_res);
-        // No WOULDBLOCK exists in linux.E; it's synonymous with .AGAIN according to the source
-        if (en != success and en != linux.E.AGAIN) {
-            self.u.err("Call to accept failed with errno {any}!", .{en});
-            return errs.ErrConnect;
-        }
-
-        try self.poll_on_sock(accept_res, timeout);
-    }
-
-    pub fn poll_on_sock(self: C_NetIO, sock_fd: usize, timeout: u16) errs!void {
-        self.u.debug("Sock fd is {any}", .{sock_fd});
-        var en = linux.errno(sock_fd);
-        std.debug.assert(en == success);
         var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
-        pfd.fd = sock_fd; //@as(i32, @intCast(sock_fd));
+        pfd.fd = @as(i32, @intCast(sock_fd));
         pfd.events = linux.POLL.OUT;
 
-        const poll_result: usize = linux.poll((&pfd)[0..1], 1, @as(i32, @intCast(timeout)));
+        const poll_result: usize = linux.poll((&pfd)[0..1], 1, @as(i32, @intCast(timeout)) * 1000);
         en = linux.errno(poll_result);
 
         if (en != success) {
@@ -222,6 +206,30 @@ pub const C_NetIO = struct {
         if (so_error != 0) {
             self.u.err("Socket failed to connect with errno {any}!", .{so_error});
             return errs.ErrConnect;
+        }
+    }
+
+    pub fn poll_on_sock_accept(self: C_NetIO, listen_sock: usize, timeout: u16) errs!void {
+        var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
+        pfd.fd = @as(i32, @intCast(listen_sock));
+        pfd.events = linux.POLL.IN;
+
+        const poll_result: usize = linux.poll((&pfd)[0..1], 1, @as(i32, @intCast(timeout)) * 1000);
+        const en = linux.errno(poll_result);
+
+        if (en != success) {
+            self.u.err("POLL failed with errno {any}!", .{en});
+            return errs.ErrAccept;
+        }
+
+        if (poll_result == 0) {
+            self.u.err("POLL timed out!", .{});
+            return errs.ErrAccept;
+        }
+
+        if (pfd.revents & linux.POLL.IN == 0) {
+            self.u.err("No POLLIN events!", .{});
+            return errs.ErrAccept;
         }
     }
 
@@ -271,21 +279,26 @@ pub const C_Socket = struct {
     addr: sockaddr_in,
 
     pub fn _init(self: *C_Socket, parent: *C_NetIO, sock: usize, addr: sockaddr_in) void {
+        const en = linux.errno(sock);
+        std.debug.assert(en == success);
         self.parent = parent;
         self.sock = sock;
         self.addr = addr;
     }
 
     pub fn write(self: C_Socket, msg: []const u8) errs!usize {
-        self.parent.u.debug("Writing msg", .{});
-        if (msg.len == 0) {
-            return 0;
+        const s: i32 = @as(i32, @intCast(self.sock));
+        const result = linux.write(s, msg.ptr, msg.len);
+        const en = linux.errno(result);
+        if (en != success) {
+            self.parent.u.err("Failed to write with errno {any}", .{en});
+            return errs.ErrWrite;
         }
-        return 0;
+        return result;
     }
 
-    pub fn recvmsg(self: C_Socket) errs![]const u8 {
-        self.parent.u.debug("Receiving msg", .{});
+    pub fn recv(self: C_Socket) errs![]const u8 {
+        self.parent.u.debug("Receiving", .{});
         return "";
     }
 

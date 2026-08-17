@@ -47,10 +47,12 @@ pub fn main(init: std.process.Init) !void {
         return;
     };
 
-    _ = net_io.accept() catch {
+    const sock = net_io.accept() catch {
         u.err("Failed to accept...", .{});
         return;
     };
+
+    _ = sock.write("Yo\n") catch {};
 
     net_io.close_bind();
 
