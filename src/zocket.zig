@@ -292,7 +292,33 @@ pub const C_NetIO = struct {
     }
 
     pub fn pollfds(self: C_NetIO, socks: []const Generic_Socket(C_Socket), results: []Generic_Socket(C_Socket)) errs!void {
-        // TODO: IMPL
+        // C Code implementation to base this off
+        // struct pollfd fds[NUM_SOCKETS];
+        // fds[0].fd = sock0;
+        // fds[0].events = POLLIN;
+        // fds[1].fd = sock1;
+        // fds[1].events = POLLIN;
+        // fds[2].fd = sock2;
+        // fds[2].events = POLLIN;
+        // while (1) {
+        //     int activity = poll(fds, NUM_SOCKETS, -1);
+        //     if (activity < 0) {
+        //         perror("poll error");
+        //         break;
+        //     }
+        //     for (int i = 0; i < NUM_SOCKETS; i++) {
+        //         if (fds[i].revents & POLLIN) {
+        //             handle_socket_data(fds[i].fd);
+        //         }
+        //         if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        //             printf("Error or disconnect on socket %d\n", fds[i].fd);
+        //             close(fds[i].fd);
+        //             fds[i].fd = -1; // Setting fd to -1 tells poll() to ignore this element
+        //         }
+        //     }
+        // }
+
+        // TODO: IMPL AND THEN SEE IF RECV() WORKS
         // var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
         // pfd.fd = @as(i32, @intCast(listen_sock));
         // pfd.events = linux.POLL.IN;
