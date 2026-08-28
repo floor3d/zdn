@@ -40,8 +40,15 @@ pub fn main(init: std.process.Init) !void {
     };
 
     _ = sock.write("Yo\n") catch {};
-    var buf: [4096]u8 = undefined;
-    _ = sock.recv(&buf, buf.len) catch {};
+    while (true) {
+        const socks = [1]@TypeOf(sock){sock};
+        var results: [3]@TypeOf(sock) = undefined;
+        try net_io.pollfds(&socks, &results, 5);
+        var buf = std.mem.zeroes([4096:0]u8);
+        const n = sock.recv(&buf, buf.len) catch 0;
+        const b = buf[0..n];
+        u.debug("{s}", .{b});
+    }
 
     net_io.close_bind();
 

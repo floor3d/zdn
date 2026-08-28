@@ -27,6 +27,10 @@ const errs = error{
     ErrWrite,
     /// Failed Recvfrom
     ErrRecv,
+    /// Failed Poll
+    ErrPoll,
+    /// Timeout Hit
+    ErrTimeout,
 };
 
 /// Generic Socket Adapter
@@ -43,7 +47,7 @@ pub fn Generic_Socket(comptime T: type) type {
             return self.inner.write(msg);
         }
 
-        pub fn recv(self: Self, buf: []u8, len: usize) errs![]const u8 {
+        pub fn recv(self: Self, buf: [*c]u8, len: usize) errs!usize {
             return self.inner.recv(buf, len);
         }
 
@@ -85,8 +89,8 @@ pub fn Generic_NetIO(comptime T: type) type {
             return self.inner.close_bind();
         }
 
-        pub fn pollfds(self: Self, socks: []const Generic_Socket(T.socktype), results: []Generic_Socket(T.socktype)) errs!void {
-            return self.inner.pollfds(socks, results);
+        pub fn pollfds(self: Self, socks: []const Generic_Socket(T.socktype), results: []Generic_Socket(T.socktype), timeout: i16) errs!void {
+            return self.inner.pollfds(socks, results, timeout);
         }
     };
 }
@@ -291,55 +295,46 @@ pub const C_NetIO = struct {
         }
     }
 
-    pub fn pollfds(self: C_NetIO, socks: []const Generic_Socket(C_Socket), results: []Generic_Socket(C_Socket)) errs!void {
-        // C Code implementation to base this off
-        // struct pollfd fds[NUM_SOCKETS];
-        // fds[0].fd = sock0;
-        // fds[0].events = POLLIN;
-        // fds[1].fd = sock1;
-        // fds[1].events = POLLIN;
-        // fds[2].fd = sock2;
-        // fds[2].events = POLLIN;
-        // while (1) {
-        //     int activity = poll(fds, NUM_SOCKETS, -1);
-        //     if (activity < 0) {
-        //         perror("poll error");
-        //         break;
-        //     }
-        //     for (int i = 0; i < NUM_SOCKETS; i++) {
-        //         if (fds[i].revents & POLLIN) {
-        //             handle_socket_data(fds[i].fd);
-        //         }
-        //         if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-        //             printf("Error or disconnect on socket %d\n", fds[i].fd);
-        //             close(fds[i].fd);
-        //             fds[i].fd = -1; // Setting fd to -1 tells poll() to ignore this element
-        //         }
-        //     }
-        // }
+    pub fn pollfds(self: C_NetIO, socks: []const Generic_Socket(C_Socket), results: []Generic_Socket(C_Socket), timeout: i16) errs!void {
+        const pfds = self.allocator.alloc(linux.pollfd, socks.len) catch {
+            return errs.ErrPoll;
+        };
+        defer self.allocator.free(pfds);
 
-        // TODO: IMPL AND THEN SEE IF RECV() WORKS
-        // var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
-        // pfd.fd = @as(i32, @intCast(listen_sock));
-        // pfd.events = linux.POLL.IN;
-        //
-        // const poll_result: usize = linux.poll((&pfd)[0..1], socks.len, @as(i32, @intCast(timeout)) * 1000);
-        // const en = linux.errno(poll_result);
-        //
-        // if (en != success) {
-        //     self.u.err("POLL failed with errno {any}!", .{en});
-        //     return errs.ErrAccept;
-        // }
-        //
-        // if (poll_result == 0) {
-        //     self.u.err("POLL timed out!", .{});
-        //     return errs.ErrAccept;
-        // }
-        //
-        // if (pfd.revents & linux.POLL.IN == 0) {
-        //     self.u.err("No POLLIN events!", .{});
-        //     return errs.ErrAccept;
-        // }
+        for (socks, 0..) |gs, i| {
+            var pfd: linux.pollfd = std.mem.zeroes(linux.pollfd);
+            pfd.fd = @as(i32, @intCast(gs.inner.sock));
+            pfd.events = linux.POLL.IN;
+            pfds[i] = pfd;
+        }
+
+        const result = linux.poll(pfds.ptr, pfds.len, @as(i32, @intCast(timeout)) * 1000);
+        const en = linux.errno(result);
+
+        if (en != success) {
+            self.u.err("POLL failed with errno {any}!", .{en});
+            return errs.ErrPoll;
+        }
+
+        if (result == 0) {
+            self.u.err("POLL timed out!", .{});
+            return errs.ErrTimeout;
+        }
+
+        var results_idx: usize = 0;
+        for (pfds, 0..) |p, i| {
+            if (p.revents & linux.POLL.IN == 0) {
+                continue;
+            }
+            if (p.revents & (linux.POLL.ERR | linux.POLL.HUP | linux.POLL.NVAL) == 1) {
+                // This socket failed
+                self.close(socks[i]);
+                continue;
+            }
+            // This socket is ready to be read
+            results[results_idx] = socks[i];
+            results_idx += 1;
+        }
     }
 };
 
@@ -369,21 +364,25 @@ pub const C_Socket = struct {
         return result;
     }
 
-    pub fn recv(self: C_Socket, buf: []u8, len: usize) errs![]const u8 {
+    pub fn recv(self: C_Socket, buf: [*c]u8, len: usize) errs!usize {
         self.parent.u.debug("Receiving from fd {any}", .{self.sock});
         const s: i32 = @as(i32, @intCast(self.sock));
 
         var bytes_read: usize = 0;
         while (bytes_read < len) {
-            const result = linux.recvfrom(s, buf.ptr, len - bytes_read, 0, null, null);
+            const result = linux.recvfrom(s, buf, len - bytes_read, 0, null, null);
             const en = linux.errno(result);
+            if (en == linux.E.AGAIN or en == linux.E.INTR) {
+                break;
+            }
             if (en != success) {
                 self.parent.u.err("Failed to recv with errno {any}", .{en});
                 return errs.ErrRecv;
             }
             bytes_read += result;
         }
-        return "";
+
+        return bytes_read;
     }
 
     pub fn _close(self: C_Socket) void {
