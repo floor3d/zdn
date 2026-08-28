@@ -3,6 +3,7 @@ const Io = std.Io;
 const zdn = @import("zdn");
 const util = @import("util.zig");
 const zocket = @import("zocket.zig");
+const config = @import("config.zig");
 
 pub fn main(init: std.process.Init) !void {
     // This is appropriate for anything that lives as long as the process.
@@ -25,6 +26,17 @@ pub fn main(init: std.process.Init) !void {
         u.err("Failed to read file!", .{});
         return;
     }
+    //
+    // 2. Parse the string into the User struct
+    const parsed = try std.json.parseFromSlice(
+        config.Config,
+        arena,
+        file_contents,
+        .{},
+    );
+    defer parsed.deinit();
+    const conf = parsed.value;
+    u.debug("Name: {s}, Type: {s}", .{ conf.name, conf.server_type });
 
     var nio_inner = zocket.C_NetIO{ .u = u, .allocator = arena };
     const net_io = zocket.Generic_NetIO(zocket.C_NetIO){ .inner = &nio_inner };

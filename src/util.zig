@@ -1,6 +1,7 @@
 const std = @import("std");
 pub const level = std.log.Level;
 const Io = std.Io;
+const File = std.Io.Dir.File;
 
 const red = "\x1b[31m";
 const yellow = "\x1b[33m";
@@ -10,6 +11,7 @@ const reset = "\x1b[0m";
 pub const Util = struct {
     init: std.process.Init,
     buffer: [1024]u8,
+    logfile: File,
 
     pub fn _init(init: std.process.Init) Util {
         return .{
@@ -105,22 +107,9 @@ pub const Util = struct {
     }
 
     pub fn read_file(self: Util, filepath: []const u8, file_contents: *[4096]u8) !usize {
-        var alloc: std.heap.DebugAllocator(.{}) = .init;
-        defer _ = alloc.deinit();
-        const allocator = alloc.allocator();
-
-        var threaded: std.Io.Threaded = .init(allocator, .{
-            .argv0 = .init(self.init.minimal.args),
-            .environ = self.init.minimal.environ,
-        });
-        defer threaded.deinit();
-        const tio = threaded.io();
-
-        var file = try std.Io.Dir.cwd().openFile(tio, filepath, .{ .mode = .read_only });
-        defer file.close(tio);
-
+        var file = try std.Io.Dir.cwd().openFile(self.init.io, filepath, .{ .mode = .read_only });
         var read_buf: [4096]u8 = undefined;
-        var file_reader = file.reader(tio, &read_buf);
+        var file_reader = file.reader(self.init.io, &read_buf);
         const reader = &file_reader.interface;
         var contents: [4096]u8 = undefined;
         const n: usize = try reader.readSliceShort(&contents);

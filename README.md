@@ -51,18 +51,12 @@ creates processes for each client
    us, future/promise style; to receive from client, just essentially need a recvmsgs()
    function of sorts, which only returns complete messages
   3. Origin server: acts like pop server to client
-8. Socket library should continually read from all its socket append to buffer;
-  once it gets a call to `recvmsg[s]()` it should read the len field and return
-  whatever the user asks for (one or multiple); question is, how to make this
-  efficient alloc wise ...
 
-9. Future/promise can be a wrapper around this library which primarily does
+8. Future/promise can be a wrapper around this library which primarily does
    `send()` and `recvmsg[s]()`
-10. Need an `init()` which binds and an `accept()`; `accept()` returns the socket
-    class which you call `send()` and `recvmsg[s]()` on
-11. Error handling when the connection is dropped...
-12. Don't lose focus of the whole picture: socket libary is for ONE socket at a
-    time
+9. Need an `init()` which binds and an `accept()`; `accept()` returns the socket
+class which you call `send()` and `recvmsg[s]()` on
+10. Error handling when the connection is dropped...
 
 ## Overall
 
