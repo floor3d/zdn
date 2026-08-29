@@ -23,7 +23,6 @@ pub fn main(init: std.process.Init) !void {
     const file_contents = try u.read_file(args[1], arena);
     defer arena.free(file_contents);
     u.debug("{s}", .{file_contents});
-    // 2. Parse the string into the User struct
     const parsed = try std.json.parseFromSlice(
         config.Config,
         arena,

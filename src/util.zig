@@ -9,12 +9,15 @@ const reset = "\x1b[0m";
 
 pub const Util = struct {
     init: std.process.Init,
-    buffer: [1024]u8,
+    buffer: [4096]u8,
+    log_buffer: [4096]u8,
+    writer: Io.Writer,
 
     pub fn _init(init: std.process.Init) Util {
         return .{
             .init = init,
             .buffer = undefined,
+            .log_buffer = undefined,
         };
     }
 
@@ -26,7 +29,7 @@ pub const Util = struct {
     fn printf_no_n(self: Util, comptime format: []const u8, args: anytype) void {
         // This dumb shit is required to get a mutable `self`
         var s = self;
-        var stderr = std.Io.File.stderr().writer(s.init.io, &s.buffer);
+        var stderr = Io.File.stderr().writer(s.init.io, &s.buffer);
         var writer = &stderr.interface;
         writer.print(format, args) catch {};
         writer.print("{s}", .{reset}) catch {};
@@ -45,6 +48,21 @@ pub const Util = struct {
         }
     }
 
+    pub fn set_logger(self: Util, filepath: []u8) void {
+        const file = Io.Dir.cwd().openFile(self.init.io, filepath, .{ .mode = .read_write }) catch {
+            return;
+        };
+        var file_writer = file.writer(self.init.io, &self.log_buffer);
+        self.writer = &file_writer.interface;
+    }
+
+    pub fn log(self: Util, comptime format: []const u8, args: anytype) void {
+        self.writer.print(format, args) catch {
+            return;
+        };
+        self.writer.flush() catch {};
+    }
+
     pub fn info(
         self: Util,
         comptime format: []const u8,
@@ -52,6 +70,7 @@ pub const Util = struct {
     ) void {
         self.print_prefix(level.info) catch {};
         self.printf(format, args);
+        self.log(format, args);
     }
 
     pub fn debug(
