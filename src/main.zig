@@ -20,13 +20,9 @@ pub fn main(init: std.process.Init) !void {
 
     u.info("Using configuration file: {s}", .{args[1]});
 
-    var file_contents: [4096]u8 = undefined;
-    const config_file_size = u.read_file(args[1], &file_contents) catch 0;
-    if (config_file_size == 0) {
-        u.err("Failed to read file!", .{});
-        return;
-    }
-    //
+    const file_contents = try u.read_file(args[1], arena);
+    defer arena.free(file_contents);
+    u.debug("{s}", .{file_contents});
     // 2. Parse the string into the User struct
     const parsed = try std.json.parseFromSlice(
         config.Config,
