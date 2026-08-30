@@ -43,7 +43,11 @@ pub fn main(init: std.process.Init) !void {
     defer l.deinit();
     l.debug("Name: {s}, Type: {s}", .{ conf.name, conf.server_type });
 
-    var nio_inner = zocket.C_NetIO{ .l = &l, .allocator = arena };
+    return;
+}
+
+fn test_stuff(l: *logz.Logger, allocator: std.mem.Allocator) !void {
+    var nio_inner = zocket.C_NetIO{ .l = &l, .allocator = allocator };
     const net_io = zocket.Generic_NetIO(zocket.C_NetIO){ .inner = &nio_inner };
 
     net_io.bind("0.0.0.0", 9798) catch {
@@ -68,6 +72,4 @@ pub fn main(init: std.process.Init) !void {
     }
 
     net_io.close_bind();
-
-    return;
 }
