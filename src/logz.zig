@@ -38,35 +38,35 @@ pub const Logger = struct {
         self.log_file.close(self.init.io);
     }
 
-    fn printf(self: *Logger, comptime format: []const u8, args: anytype) !void {
+    fn printf(self: *Logger, comptime format: []const u8, args: anytype) void {
         const new_format = format ++ "\n";
-        try self.printf_no_n(new_format, args);
+        self.printf_no_n(new_format, args);
     }
 
-    fn printf_no_n(self: *Logger, comptime format: []const u8, args: anytype) !void {
+    fn printf_no_n(self: *Logger, comptime format: []const u8, args: anytype) void {
         var writer = &self.stderr_writer.interface;
-        try writer.print(format, args);
-        try writer.flush();
-        try self.log(format, args);
+        writer.print(format, args) catch {};
+        writer.flush() catch {};
+        self.log(format, args) catch {};
     }
 
-    pub fn print_prefix(self: *Logger, lev: level) !void {
+    pub fn print_prefix(self: *Logger, lev: level) void {
         var datetime_buf: [32]u8 = undefined;
         const pre = self.now(&datetime_buf);
 
-        try self.printf_no_n("[{s}] ", .{pre});
+        self.printf_no_n("[{s}] ", .{pre});
         switch (lev) {
             .info => {
-                try self.printf_no_n("{s}INFO:{s}  ", .{ white, reset });
+                self.printf_no_n("{s}INFO:{s}  ", .{ white, reset });
             },
             .debug => {
-                try self.printf_no_n("{s}DEBUG:{s} ", .{ cyan, reset });
+                self.printf_no_n("{s}DEBUG:{s} ", .{ cyan, reset });
             },
             .warn => {
-                try self.printf_no_n("{s}WARN:{s}  ", .{ yellow, reset });
+                self.printf_no_n("{s}WARN:{s}  ", .{ yellow, reset });
             },
             .err => {
-                try self.printf_no_n("{s}ERROR:{s} ", .{ red, reset });
+                self.printf_no_n("{s}ERROR:{s} ", .{ red, reset });
             },
         }
     }
@@ -91,8 +91,8 @@ pub const Logger = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.info) catch {};
-        self.printf(format, args) catch {};
+        self.print_prefix(level.info);
+        self.printf(format, args);
     }
 
     pub fn debug(
@@ -100,8 +100,8 @@ pub const Logger = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.debug) catch {};
-        self.printf(format, args) catch {};
+        self.print_prefix(level.debug);
+        self.printf(format, args);
     }
 
     pub fn warn(
@@ -109,8 +109,8 @@ pub const Logger = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.warn) catch {};
-        self.printf(format, args) catch {};
+        self.print_prefix(level.warn);
+        self.printf(format, args);
     }
 
     pub fn err(
@@ -118,8 +118,8 @@ pub const Logger = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        self.print_prefix(level.err) catch {};
-        self.printf(format, args) catch {};
+        self.print_prefix(level.err);
+        self.printf(format, args);
     }
 
     pub fn now(self: *Logger, date_time_str: *[32]u8) []const u8 {
