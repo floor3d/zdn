@@ -4,26 +4,30 @@ const zdn = @import("zdn");
 const util = @import("util.zig");
 const zocket = @import("zocket.zig");
 const config = @import("config.zig");
+const logz = @import("logz.zig");
+
+pub fn print_usage(io: Io) !void {
+    var buf: [1024]u8 = undefined;
+    var stderr_writer = std.Io.File.stderr().writer(io, &buf);
+    const stderr = &stderr_writer.interface;
+    try stderr.print("USAGE: ./zdn [config_filepath]\n", .{});
+    try stderr.flush();
+}
 
 pub fn main(init: std.process.Init) !void {
     // This is appropriate for anything that lives as long as the process.
     const arena: std.mem.Allocator = init.arena.allocator();
-    var u = util.Util._init(init);
-    defer u.deinit(arena);
+    var u = try util.Util._init(init);
 
     const args = try init.minimal.args.toSlice(arena);
 
     if (args.len < 2) {
-        u.err("No filepath given.", .{});
-        u.print_usage();
+        try print_usage(init.io);
         return;
     }
 
-    u.info("Using configuration file: {s}", .{args[1]});
-
     const file_contents = try u.read_file(args[1], arena);
     defer arena.free(file_contents);
-    u.debug("{s}", .{file_contents});
     const parsed = try std.json.parseFromSlice(
         config.Config,
         arena,
@@ -34,20 +38,21 @@ pub fn main(init: std.process.Init) !void {
     const conf = parsed.value;
     var logfile_name_buf: [128]u8 = undefined;
     const logfile_name = std.fmt.bufPrint(&logfile_name_buf, "logs/{s}_{s}.log", .{ conf.name, conf.server_type }) catch unreachable;
-    u.set_logger(logfile_name, arena);
-    u.debug("EXPECT STUFF HERE", .{});
-    u.debug("Name: {s}, Type: {s}", .{ conf.name, conf.server_type });
 
-    var nio_inner = zocket.C_NetIO{ .u = u, .allocator = arena };
+    var l = try logz.Logger._init(init, logfile_name);
+    defer l.deinit();
+    l.debug("Name: {s}, Type: {s}", .{ conf.name, conf.server_type });
+
+    var nio_inner = zocket.C_NetIO{ .l = &l, .allocator = arena };
     const net_io = zocket.Generic_NetIO(zocket.C_NetIO){ .inner = &nio_inner };
 
     net_io.bind("0.0.0.0", 9798) catch {
-        u.err("Failed to bind...", .{});
+        l.err("Failed to bind...", .{});
         return;
     };
 
     const sock = net_io.accept() catch {
-        u.err("Failed to accept...", .{});
+        l.err("Failed to accept...", .{});
         return;
     };
 
@@ -59,7 +64,7 @@ pub fn main(init: std.process.Init) !void {
         var buf = std.mem.zeroes([4096:0]u8);
         const n = sock.recv(&buf, buf.len) catch 0;
         const b = buf[0..n];
-        u.debug("{s}", .{b});
+        l.debug("{s}", .{b});
     }
 
     net_io.close_bind();

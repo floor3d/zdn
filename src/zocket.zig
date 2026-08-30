@@ -1,6 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 const util = @import("util.zig");
+const logz = @import("logz.zig");
 const posix = std.posix;
 const linux = std.os.linux;
 const sockaddr = posix.sockaddr;
@@ -100,7 +101,7 @@ pub fn Generic_NetIO(comptime T: type) type {
 /// `bind()`, `accept()`
 /// Note that `bind()` covers both `bind()` and `listen()`
 pub const C_NetIO = struct {
-    u: util.Util,
+    l: *logz.Logger,
     c_sock: usize = 0,
     allocator: std.mem.Allocator,
 
@@ -126,16 +127,16 @@ pub const C_NetIO = struct {
     }
 
     pub fn bind(self: *C_NetIO, ip: []const u8, port: u16) errs!void {
-        self.u.debug("Binding on {s}:{d}", .{ ip, port });
+        self.l.debug("Binding on {s}:{d}", .{ ip, port });
 
         // Plan: Just handle ipv4 for now because fuck the system!
         self.c_sock = linux.socket(std.c.AF.INET, std.c.SOCK.STREAM | std.c.SOCK.NONBLOCK, 0);
         if (linux.errno(self.c_sock) != success) {
-            self.u.err("Uh oh ... socket is {d}", .{self.c_sock});
+            self.l.err("Uh oh ... socket is {d}", .{self.c_sock});
             return errs.ErrSocket;
         }
 
-        self.u.debug("Bind socket: {d}", .{self.c_sock});
+        self.l.debug("Bind socket: {d}", .{self.c_sock});
 
         const s_in = try ip_port_to_sockaddr(ip, port);
 
@@ -147,7 +148,7 @@ pub const C_NetIO = struct {
 
         var en = linux.errno(sso_result);
         if (en != success) {
-            self.u.err("Uh oh ... sso_result is {any}", .{en});
+            self.l.err("Uh oh ... sso_result is {any}", .{en});
             return errs.ErrBind;
         }
 
@@ -155,7 +156,7 @@ pub const C_NetIO = struct {
 
         en = linux.errno(bind_result);
         if (en != success) {
-            self.u.err("Uh oh ... bind_result is {any}", .{en});
+            self.l.err("Uh oh ... bind_result is {any}", .{en});
             return errs.ErrBind;
         }
 
@@ -163,7 +164,7 @@ pub const C_NetIO = struct {
 
         en = linux.errno(listen_result);
         if (en != success) {
-            self.u.err("Uh oh ... listen_result is {any}", .{en});
+            self.l.err("Uh oh ... listen_result is {any}", .{en});
             return errs.ErrListen;
         }
 
@@ -178,21 +179,21 @@ pub const C_NetIO = struct {
         try self.poll_on_sock_accept(self.c_sock, 10);
         const sock: usize = linux.accept4(@as(i32, @intCast(self.c_sock)), @ptrCast(&addr), &addr_len, linux.SOCK.NONBLOCK);
         if (linux.errno(sock) != success) {
-            self.u.err("Uh oh ... accept failed!", .{});
+            self.l.err("Uh oh ... accept failed!", .{});
             return errs.ErrSocket;
         }
         var c_s: *C_Socket = self.allocator.create(C_Socket) catch {
             return errs.ErrConnect;
         };
         c_s._init(self, sock, addr);
-        self.u.debug("Accepted socket: {any}", .{sock});
+        self.l.debug("Accepted socket: {any}", .{sock});
         return Generic_Socket(C_Socket){ .inner = c_s };
     }
 
     pub fn poll_on_sock_connect(self: C_NetIO, sock_fd: usize, connect_res: usize, timeout: u16) errs!void {
         var en = linux.errno(connect_res);
         if (en != success and en != linux.E.INPROGRESS) {
-            self.u.err("Call to connect failed with errno {any}!", .{en});
+            self.l.err("Call to connect failed with errno {any}!", .{en});
             return errs.ErrConnect;
         }
 
@@ -204,17 +205,17 @@ pub const C_NetIO = struct {
         en = linux.errno(poll_result);
 
         if (en != success) {
-            self.u.err("POLL failed with errno {any}!", .{en});
+            self.l.err("POLL failed with errno {any}!", .{en});
             return errs.ErrConnect;
         }
 
         if (poll_result == 0) {
-            self.u.err("POLL timed out!", .{});
+            self.l.err("POLL timed out!", .{});
             return errs.ErrConnect;
         }
 
         if (pfd.revents & (linux.POLL.OUT | linux.POLL.ERR | linux.POLL.HUP) == 0) {
-            self.u.err("No PFD revents!", .{});
+            self.l.err("No PFD revents!", .{});
             return errs.ErrConnect;
         }
 
@@ -224,12 +225,12 @@ pub const C_NetIO = struct {
         const gso_result: usize = linux.getsockopt(@as(i32, @intCast(sock_fd)), linux.SOL.SOCKET, linux.SO.ERROR, @ptrCast(&so_error), &socklen);
         en = linux.errno(gso_result);
         if (en != success) {
-            self.u.err("getsockopt() failed with errno {any}!", .{en});
+            self.l.err("getsockopt() failed with errno {any}!", .{en});
             return errs.ErrConnect;
         }
 
         if (so_error != 0) {
-            self.u.err("Socket failed to connect with errno {any}!", .{so_error});
+            self.l.err("Socket failed to connect with errno {any}!", .{so_error});
             return errs.ErrConnect;
         }
     }
@@ -243,17 +244,17 @@ pub const C_NetIO = struct {
         const en = linux.errno(poll_result);
 
         if (en != success) {
-            self.u.err("POLL failed with errno {any}!", .{en});
+            self.l.err("POLL failed with errno {any}!", .{en});
             return errs.ErrAccept;
         }
 
         if (poll_result == 0) {
-            self.u.err("POLL timed out!", .{});
+            self.l.err("POLL timed out!", .{});
             return errs.ErrAccept;
         }
 
         if (pfd.revents & linux.POLL.IN == 0) {
-            self.u.err("No POLLIN events!", .{});
+            self.l.err("No POLLIN events!", .{});
             return errs.ErrAccept;
         }
     }
@@ -261,12 +262,12 @@ pub const C_NetIO = struct {
     // Self needs to be a pointer here so that when we return from the function,
     // the `C_Socket` stays valid and doesn't get wiped out with the function stack frame
     pub fn connect(self: *C_NetIO, ip: []const u8, port: u16, timeout: u16) errs!Generic_Socket(socktype) {
-        self.u.debug("Connecting to {s}:{d}", .{ ip, port });
+        self.l.debug("Connecting to {s}:{d}", .{ ip, port });
 
         // Plan: Just handle ipv4 for now because fuck the system!
         self.c_sock = linux.socket(std.c.AF.INET, std.c.SOCK.STREAM | std.c.SOCK.NONBLOCK, 0);
         if (linux.errno(self.c_sock) != success) {
-            self.u.err("Failed to create socket!", .{});
+            self.l.err("Failed to create socket!", .{});
             return errs.ErrSocket;
         }
 
@@ -291,7 +292,7 @@ pub const C_NetIO = struct {
     pub fn close_bind(self: C_NetIO) void {
         const close_result: usize = linux.close(@as(i32, @intCast(self.c_sock)));
         if (linux.errno(close_result) != success) {
-            self.u.err("Failed to close bind socket!", .{});
+            self.l.err("Failed to close bind socket!", .{});
         }
     }
 
@@ -312,12 +313,12 @@ pub const C_NetIO = struct {
         const en = linux.errno(result);
 
         if (en != success) {
-            self.u.err("POLL failed with errno {any}!", .{en});
+            self.l.err("POLL failed with errno {any}!", .{en});
             return errs.ErrPoll;
         }
 
         if (result == 0) {
-            self.u.err("POLL timed out!", .{});
+            self.l.err("POLL timed out!", .{});
             return errs.ErrTimeout;
         }
 
@@ -358,14 +359,14 @@ pub const C_Socket = struct {
         const result = linux.write(s, msg.ptr, msg.len);
         const en = linux.errno(result);
         if (en != success) {
-            self.parent.u.err("Failed to write with errno {any}", .{en});
+            self.parent.l.err("Failed to write with errno {any}", .{en});
             return errs.ErrWrite;
         }
         return result;
     }
 
     pub fn recv(self: C_Socket, buf: [*c]u8, len: usize) errs!usize {
-        self.parent.u.debug("Receiving from fd {any}", .{self.sock});
+        self.parent.l.debug("Receiving from fd {any}", .{self.sock});
         const s: i32 = @as(i32, @intCast(self.sock));
 
         var bytes_read: usize = 0;
@@ -376,7 +377,7 @@ pub const C_Socket = struct {
                 break;
             }
             if (en != success) {
-                self.parent.u.err("Failed to recv with errno {any}", .{en});
+                self.parent.l.err("Failed to recv with errno {any}", .{en});
                 return errs.ErrRecv;
             }
             bytes_read += result;
@@ -388,7 +389,7 @@ pub const C_Socket = struct {
     pub fn _close(self: C_Socket) void {
         const close_result: usize = linux.close(@as(i32, @intCast(self.sock)));
         if (linux.errno(close_result) != success) {
-            self.parent.u.err("Failed to close socket!", .{});
+            self.parent.l.err("Failed to close socket!", .{});
         }
     }
 };
