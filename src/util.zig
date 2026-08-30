@@ -11,19 +11,26 @@ pub const Util = struct {
     init: std.process.Init,
     buffer: [4096]u8,
     log_buffer: [4096]u8,
-    writer: Io.Writer,
+    filepath: ?[]u8,
 
     pub fn _init(init: std.process.Init) Util {
         return .{
             .init = init,
             .buffer = undefined,
             .log_buffer = undefined,
+            .filepath = null,
         };
+    }
+
+    pub fn deinit(self: Util, allocator: std.mem.Allocator) void {
+        const fp = self.filepath orelse return;
+        allocator.free(fp);
     }
 
     fn printf(self: Util, comptime format: []const u8, args: anytype) void {
         const new_format = format ++ "\n";
         self.printf_no_n(new_format, args);
+        self.log(new_format, args);
     }
 
     fn printf_no_n(self: Util, comptime format: []const u8, args: anytype) void {
@@ -40,27 +47,58 @@ pub const Util = struct {
         var datetime_buf: [32]u8 = undefined;
         const pre = self.now(&datetime_buf);
         self.printf_no_n("[{s}] ", .{pre});
+        self.log("[{s}] ", .{pre});
         switch (lev) {
-            .info => self.printf_no_n("INFO:  ", .{}),
-            .debug => self.printf_no_n("{s}DEBUG: ", .{cyan}),
-            .warn => self.printf_no_n("{s}WARN:  ", .{yellow}),
-            .err => self.printf_no_n("{s}ERROR: ", .{red}),
+            .info => {
+                self.printf_no_n("INFO:  ", .{});
+                self.log("INFO:  ", .{});
+            },
+            .debug => {
+                self.printf_no_n("{s}DEBUG: ", .{cyan});
+                self.log("{s}DEBUG: ", .{cyan});
+            },
+            .warn => {
+                self.printf_no_n("{s}WARN:  ", .{yellow});
+                self.log("{s}WARN:  ", .{yellow});
+            },
+            .err => {
+                self.printf_no_n("{s}ERROR: ", .{red});
+                self.log("{s}ERROR: ", .{red});
+            },
         }
     }
 
-    pub fn set_logger(self: Util, filepath: []u8) void {
-        const file = Io.Dir.cwd().openFile(self.init.io, filepath, .{ .mode = .read_write }) catch {
+    pub fn set_logger(self: *Util, filepath: []u8, allocator: std.mem.Allocator) void {
+        self.filepath = allocator.alloc(u8, filepath.len) catch |er| {
+            self.err("Failed to allocate: {any}", .{er});
             return;
         };
-        var file_writer = file.writer(self.init.io, &self.log_buffer);
-        self.writer = &file_writer.interface;
+        const fp = self.filepath orelse {
+            return;
+        };
+        @memcpy(fp, filepath);
+
+        const file = Io.Dir.cwd().createFile(self.init.io, fp, .{}) catch {
+            return;
+        };
+        file.close(self.init.io);
     }
 
     pub fn log(self: Util, comptime format: []const u8, args: anytype) void {
-        self.writer.print(format, args) catch {
+        const fp = self.filepath orelse {
             return;
         };
-        self.writer.flush() catch {};
+        const file = Io.Dir.cwd().openFile(self.init.io, fp, .{ .mode = .read_write }) catch {
+            return;
+        };
+        // This dumb shit is required to get a mutable `self`
+        var s = self;
+        var file_writer = file.writer(self.init.io, &s.log_buffer);
+        var writer = &file_writer.interface;
+        writer.print(format, args) catch {
+            return;
+        };
+        writer.flush() catch {};
     }
 
     pub fn info(
@@ -70,7 +108,6 @@ pub const Util = struct {
     ) void {
         self.print_prefix(level.info) catch {};
         self.printf(format, args);
-        self.log(format, args);
     }
 
     pub fn debug(

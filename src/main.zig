@@ -9,6 +9,7 @@ pub fn main(init: std.process.Init) !void {
     // This is appropriate for anything that lives as long as the process.
     const arena: std.mem.Allocator = init.arena.allocator();
     var u = util.Util._init(init);
+    defer u.deinit(arena);
 
     const args = try init.minimal.args.toSlice(arena);
 
@@ -31,6 +32,10 @@ pub fn main(init: std.process.Init) !void {
     );
     defer parsed.deinit();
     const conf = parsed.value;
+    var logfile_name_buf: [128]u8 = undefined;
+    const logfile_name = std.fmt.bufPrint(&logfile_name_buf, "logs/{s}_{s}.log", .{ conf.name, conf.server_type }) catch unreachable;
+    u.set_logger(logfile_name, arena);
+    u.debug("EXPECT STUFF HERE", .{});
     u.debug("Name: {s}, Type: {s}", .{ conf.name, conf.server_type });
 
     var nio_inner = zocket.C_NetIO{ .u = u, .allocator = arena };
