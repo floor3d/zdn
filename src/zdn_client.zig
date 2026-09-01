@@ -33,8 +33,6 @@ pub const Client = struct {
 };
 
 // Plan
-// 1. Make it so that the socket library works with UDP
-// 2. Start thread that sends a beacon with a nonce every .8-1.2 seconds to 255.255.255.255
-// 3. Poll on that UDP socket and see if we get anything back; if not, send another broadcast
-// 4. Once we get a response back, check that the nonce matches, and if so, Yay! We found our server!
-// 5. max tries = 100 or something
+// 1. Create hyper simple http library
+// 2. Keep connection alive, but if connection drops, use "dns" to resolve and re-create connection (create fake dns service)
+// 3. http advertises: session(), get(), post(); all use timeout logic under the hood

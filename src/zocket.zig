@@ -366,7 +366,6 @@ pub const C_Socket = struct {
     }
 
     pub fn recv(self: C_Socket, buf: [*c]u8, len: usize) errs!usize {
-        self.parent.l.debug("Receiving from fd {any}", .{self.sock});
         const s: i32 = @as(i32, @intCast(self.sock));
 
         var bytes_read: usize = 0;
@@ -374,7 +373,7 @@ pub const C_Socket = struct {
             const result = linux.recvfrom(s, buf, len - bytes_read, 0, null, null);
             const en = linux.errno(result);
             if (en == linux.E.AGAIN or en == linux.E.INTR) {
-                break;
+                continue;
             }
             if (en != success) {
                 self.parent.l.err("Failed to recv with errno {any}", .{en});
