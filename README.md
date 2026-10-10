@@ -1,5 +1,12 @@
 # Zig Distribution Network
 
+## Setup
+1. install direnv
+2. install nix
+3. add self to `nixbld` group
+4. enable and start `nix-daemon`
+5. if you get a direnv `error: opening file "/nix/store": No such file or directory`, try a `sudo nix-store --verify --check-contents --repair`
+
 ## Notes
 
 1. Need Origin_Server, Pop_Server, Client
